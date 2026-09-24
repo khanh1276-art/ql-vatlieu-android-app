@@ -21,37 +21,21 @@ const AppState = {
 // ============================================================================
 // 1. API FETCH WRAPPER (TỰ ĐỘNG GẮN TOKEN & BẢO MẬT)
 // ============================================================================
-async function apiFetch(endpoint, options = {}) {
-  let fullUrl = endpoint;
-  if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
-    const base = (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl)
-      ? NativeApp.getServerUrl()
-      : (localStorage.getItem('native_server_url') || 'https://ql-vatlieu-congtruong.onrender.com');
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    fullUrl = `${base}${cleanEndpoint}`;
-  }
-
+async function apiFetch(url, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   if (AppState.token) {
     headers['Authorization'] = `Bearer ${AppState.token}`;
   }
-
-  try {
-    const res = await fetch(fullUrl, { ...options, headers });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      if (res.status === 401 && !endpoint.includes('/api/auth/login')) {
-        handleUnauthorized();
-      }
-      throw new Error(errData.error || `Yêu cầu thất bại (Mã lỗi: ${res.status})`);
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error('Chưa đăng nhập hoặc phiên làm việc đã hết hạn');
     }
-    return res;
-  } catch (err) {
-    if (typeof NativeApp !== 'undefined' && NativeApp.vibrateError) {
-      NativeApp.vibrateError();
-    }
-    throw err;
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Yêu cầu thất bại (Mã lỗi: ${res.status})`);
   }
+  return res;
 }
 
 // ============================================================================
@@ -136,8 +120,16 @@ async function checkAuth() {
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res = await apiFetch('/api/auth/me', { signal: controller.signal });
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${AppState.token}` },
+      signal: controller.signal
+    });
     clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      handleUnauthorized();
+      return;
+    }
 
     const user = await res.json();
     onLoginSuccess(user, AppState.token, false);
@@ -168,7 +160,7 @@ async function handleLogin(e) {
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const res = await apiFetch('/api/auth/login', {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -177,12 +169,16 @@ async function handleLogin(e) {
     clearTimeout(timeoutId);
 
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Đăng nhập không thành công');
+    }
+
     onLoginSuccess(data.user, data.token, true);
   } catch (err) {
     clearTimeout(timeoutId);
     if (errorDiv) {
       if (err.name === 'AbortError') {
-        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc mạng chậm. Vui lòng bấm Đăng nhập lại sau vài giây!';
+        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc đang triển khai phiên bản mới. Vui lòng bấm Đăng nhập lại sau 15-30 giây!';
       } else {
         errorDiv.textContent = err.message || 'Lỗi kết nối máy chủ';
       }
@@ -228,7 +224,10 @@ function onLoginSuccess(user, token, showGreeting = false) {
 async function handleLogout() {
   if (!confirm('Bạn có chắc chắn muốn đăng xuất khỏi hệ thống?')) return;
   try {
-    await apiFetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AppState.token}` }
+    });
   } catch (e) {
     // Bỏ qua lỗi mạng khi logout
   }
@@ -282,26 +281,24 @@ function applyUserRolePermissions(user) {
     }
   }
 
-  // 2. Khung dự án trên Header (Nằm trên dòng riêng biệt, rộng rãi)
+  // 2. Khung dự án trên Header
   const scopeBox = document.getElementById('projectHeaderScopeBox');
   if (scopeBox) {
     if (isAdmin || isMod) {
       // Admin và Điều hành có thể xem và lọc qua lại giữa mọi dự án
       scopeBox.innerHTML = `
-        <span class="text-slate-300 text-xs font-bold flex items-center gap-1 flex-shrink-0">
-          <span>🏗️</span> <span class="hidden xs:inline">Dự Án:</span>
-        </span>
+        <span class="text-slate-400 text-xs font-medium">Dự án:</span>
         <select id="headerProjectSelect" onchange="handleHeaderProjectChange()"
-          class="flex-1 w-full bg-slate-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-blue-500 shadow-inner">
+          class="bg-slate-900 text-white text-xs font-semibold rounded px-2 py-1 border border-slate-700 focus:outline-none focus:border-blue-500">
         </select>
       `;
     } else {
       // Công trường bị khóa cố định vào đúng dự án của mình
       AppState.selectedProjectId = user.project_id || '';
       scopeBox.innerHTML = `
-        <span class="text-slate-400 text-xs font-medium flex-shrink-0">🏗️ Dự án:</span>
-        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/70 px-2 py-0.5 rounded-lg border border-emerald-800 truncate flex-1">
-          ${escapeHtml(user.project_name || 'Công trường phụ trách')}
+        <span class="text-slate-400 text-xs font-medium">Dự án trực thuộc:</span>
+        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+          🏗️ ${escapeHtml(user.project_name || 'Công trường phụ trách')}
         </span>
       `;
     }
@@ -506,9 +503,9 @@ function switchTab(tabId) {
 
   document.querySelectorAll('.nav-tab').forEach((btn) => {
     if (btn.dataset.tab === tabId) {
-      btn.className = 'nav-tab active-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-white bg-blue-600 font-semibold shadow-sm text-xs sm:text-sm';
+      btn.className = 'nav-tab active-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-white bg-blue-600 font-semibold';
     } else {
-      btn.className = 'nav-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-slate-400 hover:text-white hover:bg-slate-800/80 font-medium text-xs sm:text-sm';
+      btn.className = 'nav-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800 font-medium';
     }
   });
 
@@ -602,19 +599,13 @@ async function loadVehicles() {
 // ============================================================================
 // 8. FORM CHECK-IN: GỢI Ý BIỂN SỐ & TÍNH TOÁN QUY CÁCH
 // ============================================================================
-function handleCheckinUnitInput(val) {
-  const v = (val || 'm³').trim();
-  const actBadge = document.getElementById('checkinActualUnitBadge') || document.getElementById('unitBadgeActual');
-  if (actBadge) actBadge.textContent = v;
-}
-
 function getCheckinUnit() {
-  const unitIn = document.getElementById('checkin_unit');
-  if (unitIn && unitIn.value && unitIn.value.trim()) return unitIn.value.trim();
+  const hiddenUnit = document.getElementById('checkin_unit');
+  if (hiddenUnit && hiddenUnit.value) return hiddenUnit.value;
   const matSel = document.getElementById('checkin_material');
   if (matSel && matSel.selectedIndex >= 0) {
     const opt = matSel.options[matSel.selectedIndex];
-    if (opt && opt.dataset && opt.dataset.unit) return opt.dataset.unit.trim();
+    if (opt && opt.dataset && opt.dataset.unit) return opt.dataset.unit;
   }
   const badge = document.getElementById('checkinStdUnitBadge') || document.getElementById('unitBadgeStd');
   if (badge && badge.textContent) return badge.textContent.trim();
@@ -698,14 +689,11 @@ function selectVehicleSuggestion(plate) {
   if (stdIn) stdIn.value = v.standard_volume || '';
 
   const unit = v.unit || 'm³';
-  const unitIn = document.getElementById('checkin_unit');
-  if (unitIn) unitIn.value = unit;
+  const hiddenUnit = document.getElementById('checkin_unit');
+  if (hiddenUnit) hiddenUnit.value = unit;
 
   const stdBadge = document.getElementById('checkinStdUnitBadge') || document.getElementById('unitBadgeStd');
-  if (stdBadge) {
-    if (stdBadge.tagName === 'INPUT') stdBadge.value = unit;
-    else stdBadge.textContent = unit;
-  }
+  if (stdBadge) stdBadge.textContent = unit;
   const actBadge = document.getElementById('checkinActualUnitBadge') || document.getElementById('unitBadgeActual');
   if (actBadge) actBadge.textContent = unit;
 
@@ -725,14 +713,11 @@ function handleCheckinMaterialChange() {
   const opt = sel.options[sel.selectedIndex];
   const unit = opt?.dataset?.unit || 'm³';
 
-  const unitIn = document.getElementById('checkin_unit');
-  if (unitIn) unitIn.value = unit;
+  const hiddenUnit = document.getElementById('checkin_unit');
+  if (hiddenUnit) hiddenUnit.value = unit;
 
   const stdBadge = document.getElementById('checkinStdUnitBadge') || document.getElementById('unitBadgeStd');
-  if (stdBadge) {
-    if (stdBadge.tagName === 'INPUT') stdBadge.value = unit;
-    else stdBadge.textContent = unit;
-  }
+  if (stdBadge) stdBadge.textContent = unit;
 
   const actualBadge = document.getElementById('checkinActualUnitBadge') || document.getElementById('unitBadgeActual');
   if (actualBadge) actualBadge.textContent = unit;
@@ -875,43 +860,21 @@ async function handleCheckIn(event) {
     btn.innerHTML = '<span>⏳ Đang ghi nhận...</span>';
   }
 
-  if (typeof NativeApp !== 'undefined' && NativeApp.capturedPhotoBase64) {
-    payload.photo_base64 = NativeApp.capturedPhotoBase64;
-    payload.notes = (payload.notes ? (payload.notes + ' ') : '') + '[Có kèm ảnh chụp]';
-  }
-
-  let isOffline = !navigator.onLine;
-  let data = null;
-
   try {
-    if (!isOffline) {
-      try {
-        const res = await apiFetch('/api/tickets/checkin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        data = await res.json();
-      } catch (netErr) {
-        console.warn('Không có kết nối máy chủ, chuyển sang hàng đợi offline:', netErr);
-        isOffline = true;
-      }
+    const res = await apiFetch('/api/tickets/checkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Lỗi khi ghi nhận xe vào');
     }
 
-    if (isOffline) {
-      if (typeof NativeApp !== 'undefined') {
-        NativeApp.saveTicketToQueue(payload);
-        NativeApp.removePhoto();
-      }
-      showToast(`💾 ĐÃ LƯU NGOẠI TUYẾN: Xe ${payload.plate_number}. Sẽ tự đồng bộ khi có sóng 4G/Wifi!`, 'warning');
-    } else {
-      if (typeof NativeApp !== 'undefined') {
-        NativeApp.vibrateSuccess();
-        NativeApp.removePhoto();
-      }
-      showToast(`✓ Đã ghi nhận xe ${data.plate_number} vào ${data.project_name || 'công trường'}! (${data.actual_volume} ${data.unit})`, 'success');
-      loadVehicles();
-    }
+    showToast(`✓ Đã ghi nhận xe ${data.plate_number} vào ${data.project_name || 'công trường'}! (${data.actual_volume} ${data.unit})`, 'success');
+
+    loadVehicles();
 
     // Reset form
     const form = document.getElementById('checkInForm');
@@ -1504,12 +1467,6 @@ function openEditTicketModalById(id) {
   const volIn = document.getElementById('edit_actual_volume');
   if (volIn) volIn.value = ticket.actual_volume;
 
-  const matIn = document.getElementById('edit_material');
-  if (matIn) matIn.value = ticket.material_name || '';
-
-  const unitIn = document.getElementById('edit_unit');
-  if (unitIn) unitIn.value = ticket.unit || 'm³';
-
   const reasonIn = document.getElementById('edit_adjust_reason');
   if (reasonIn) reasonIn.value = ticket.adjustment_reason || '';
 
@@ -1530,8 +1487,6 @@ async function saveEditTicket(e) {
   const id = document.getElementById('edit_ticket_id')?.value;
   const plate_number = (document.getElementById('edit_plate')?.value || '').trim().toUpperCase();
   const actual_volume = parseFloat(document.getElementById('edit_actual_volume')?.value);
-  const material_name = (document.getElementById('edit_material')?.value || '').trim();
-  const unit = (document.getElementById('edit_unit')?.value || 'm³').trim();
   const adjustment_reason = (document.getElementById('edit_adjust_reason')?.value || '').trim();
   const notes = (document.getElementById('edit_notes')?.value || '').trim();
 
@@ -1551,8 +1506,6 @@ async function saveEditTicket(e) {
       body: JSON.stringify({
         plate_number,
         actual_volume,
-        material_name: material_name || undefined,
-        unit: unit || undefined,
         adjustment_reason,
         notes,
         is_manual_adjusted: 1
@@ -1588,8 +1541,7 @@ function exportDailyExcel() {
   let url = `/api/reports/export-excel?type=daily&date=${date}`;
   if (projectId) url += `&projectId=${projectId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  const base = (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) ? NativeApp.getServerUrl() : '';
-  window.open(`${base}${url}`, '_blank');
+  window.location.href = url;
 }
 
 // ============================================================================
@@ -1708,8 +1660,7 @@ function exportCumulativeExcel() {
   let url = `/api/reports/export-excel?type=cumulative&startDate=${startDate}&endDate=${endDate}`;
   if (projectId) url += `&projectId=${projectId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  const base = (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) ? NativeApp.getServerUrl() : '';
-  window.open(`${base}${url}`, '_blank');
+  window.location.href = url;
 }
 
 // ============================================================================
@@ -2882,7 +2833,15 @@ async function loadBackupInfo() {
 async function downloadJsonBackup() {
   try {
     showToast('Đang chuẩn bị bản sao lưu JSON...', 'info');
-    const res = await apiFetch('/api/backup/export');
+    const token = AppState.token || localStorage.getItem('auth_token');
+    const res = await fetch('/api/backup/export', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Lỗi xuất dữ liệu');
+    }
+
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2904,7 +2863,15 @@ async function downloadJsonBackup() {
 async function downloadDbFile() {
   try {
     showToast('Đang chuẩn bị file database SQLite...', 'info');
-    const res = await apiFetch('/api/backup/download-db');
+    const token = AppState.token || localStorage.getItem('auth_token');
+    const res = await fetch('/api/backup/download-db', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Lỗi tải database');
+    }
+
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
