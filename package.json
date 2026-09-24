@@ -1,0 +1,26 @@
+{
+  "name": "ql-vatlieu-android-app",
+  "version": "1.0.0",
+  "description": "Ứng dụng Android Native Quản Lý Kho Vật Liệu & Xe Vào Ra Công Trường (Hybrid Native Capacitor)",
+  "main": "www/index.html",
+  "scripts": {
+    "build": "node build.js",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/android": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  },
+  "keywords": [
+    "android",
+    "capacitor",
+    "construction",
+    "material-management"
+  ],
+  "author": "Antigravity",
+  "license": "ISC"
+}

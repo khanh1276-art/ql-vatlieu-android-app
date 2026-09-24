@@ -1,0 +1,14 @@
+{
+  "appId": "com.khovattu.congtruong",
+  "appName": "Kho Vật Liệu",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  }
+}

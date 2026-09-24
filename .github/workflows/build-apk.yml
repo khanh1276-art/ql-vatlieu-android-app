@@ -1,0 +1,47 @@
+name: Tự Động Biên Dịch Android APK (Build Android App)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Tải mã nguồn (Checkout Code)
+        uses: actions/checkout@v4
+
+      - name: Thiết lập môi trường Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Thiết lập Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cài đặt thư viện & Đồng bộ Capacitor
+        run: |
+          npm install
+          npx cap sync android
+
+      - name: Cấp quyền thực thi cho Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: Biên dịch file cài đặt APK (Build APK)
+        run: |
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Đóng gói và lưu trữ file APK để tải về
+        uses: actions/upload-artifact@v4
+        with:
+          name: KhoVatLieu-CongTruong-App-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

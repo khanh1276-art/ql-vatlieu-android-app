@@ -1,0 +1,19 @@
+# Dependencies (KHÔNG UPLOAD - Đã có package.json)
+node_modules/
+package-lock.json
+
+# Android Build & Cache
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+local.properties
+*.apk
+*.aab
+
+# OS & Logs
+*.log
+.DS_Store
+Thumbs.db
