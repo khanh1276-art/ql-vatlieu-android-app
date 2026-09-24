@@ -72,6 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initDates();
   checkAuth();
 
+  // Tự động tải trước danh mục công khai (Dự án, Nhà cung cấp, Vật liệu, Xe)
+  loadProjects().catch(() => {});
+  loadSuppliers().catch(() => {});
+  loadMaterials().catch(() => {});
+  loadVehicles().catch(() => {});
+
   // Tự động làm mới xe trong bãi mỗi 20 giây nếu đang ở tab vào/ra hoặc dashboard
   setInterval(() => {
     if (AppState.currentUser && (AppState.currentTab === 'checkin' || AppState.currentTab === 'dashboard')) {
@@ -309,7 +315,7 @@ function applyUserRolePermissions(user) {
           class="flex-1 w-full bg-slate-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-blue-500 shadow-inner">
         </select>
       `;
-      populateHeaderProjectDropdown();
+      populateProjectDropdowns();
     } else {
       // Công trường bị khóa cố định vào đúng dự án của mình
       AppState.selectedProjectId = user.project_id || '';
@@ -378,9 +384,20 @@ async function loadInitialData() {
 // 5. QUẢN LÝ DỰ ÁN & BỘ CHỌN DỰ ÁN (PROJECT SWITCHER)
 // ============================================================================
 async function loadProjects() {
+  if (!AppState.projects || AppState.projects.length === 0) {
+    try {
+      const cached = localStorage.getItem('cached_projects');
+      if (cached) {
+        AppState.projects = JSON.parse(cached);
+        populateProjectDropdowns();
+      }
+    } catch (_) {}
+  }
+
   try {
     const res = await apiFetch('/api/projects');
     AppState.projects = await res.json();
+    try { localStorage.setItem('cached_projects', JSON.stringify(AppState.projects)); } catch (_) {}
     populateProjectDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục dự án:', err);
@@ -554,9 +571,20 @@ function switchTab(tabId) {
 // 7. NẠP DANH MỤC CƠ BẢN (SUPPLIERS, MATERIALS, VEHICLES)
 // ============================================================================
 async function loadSuppliers() {
+  if (!AppState.suppliers || AppState.suppliers.length === 0) {
+    try {
+      const cached = localStorage.getItem('cached_suppliers');
+      if (cached) {
+        AppState.suppliers = JSON.parse(cached);
+        populateSupplierDropdowns();
+      }
+    } catch (_) {}
+  }
+
   try {
     const res = await apiFetch('/api/suppliers');
     AppState.suppliers = await res.json();
+    try { localStorage.setItem('cached_suppliers', JSON.stringify(AppState.suppliers)); } catch (_) {}
     populateSupplierDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục nhà cung cấp:', err);
@@ -589,9 +617,20 @@ function populateSupplierDropdowns() {
 }
 
 async function loadMaterials() {
+  if (!AppState.materials || AppState.materials.length === 0) {
+    try {
+      const cached = localStorage.getItem('cached_materials');
+      if (cached) {
+        AppState.materials = JSON.parse(cached);
+        populateMaterialDropdowns();
+      }
+    } catch (_) {}
+  }
+
   try {
     const res = await apiFetch('/api/materials');
     AppState.materials = await res.json();
+    try { localStorage.setItem('cached_materials', JSON.stringify(AppState.materials)); } catch (_) {}
     populateMaterialDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục vật liệu:', err);
@@ -615,9 +654,19 @@ function populateMaterialDropdowns() {
 }
 
 async function loadVehicles() {
+  if (!AppState.vehicles || AppState.vehicles.length === 0) {
+    try {
+      const cached = localStorage.getItem('cached_vehicles');
+      if (cached) {
+        AppState.vehicles = JSON.parse(cached);
+      }
+    } catch (_) {}
+  }
+
   try {
     const res = await apiFetch('/api/vehicles');
     AppState.vehicles = await res.json();
+    try { localStorage.setItem('cached_vehicles', JSON.stringify(AppState.vehicles)); } catch (_) {}
   } catch (err) {
     console.error('Lỗi tải danh mục xe:', err);
   }
