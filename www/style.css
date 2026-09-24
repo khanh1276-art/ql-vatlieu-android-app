@@ -1,6 +1,39 @@
 /* Tùy chỉnh CSS giao diện Quản lý Vật liệu Công trường */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
 
+/* ==========================================================================
+   KHÓA CỐ ĐỊNH TỈ LỆ & KÍCH THƯỚC CHUẨN NATIVE CHO ANDROID
+   ========================================================================== */
+html, body {
+  /* Chặn zoom cử chỉ (Pinch-to-zoom và Double-tap) */
+  touch-action: pan-x pan-y;
+  /* Chặn Android tự phóng to chữ làm lệch khung */
+  -webkit-text-size-adjust: 100% !important;
+  text-size-adjust: 100% !important;
+  /* Chặn chọn chữ vô tình như trên web */
+  -webkit-user-select: none;
+  user-select: none;
+  /* Chặn hiệu ứng co giãn giật màn hình khi kéo kịch */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  width: 100%;
+  height: 100%;
+}
+
+/* Cho phép chọn văn bản trong ô nhập liệu */
+input, textarea, select {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+/* Chuẩn hóa toàn bộ hình ảnh cố định, không méo tỉ lệ */
+img, svg {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
 :root {
   --primary: #1d4ed8;
   --primary-hover: #1e40af;
