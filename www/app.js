@@ -296,24 +296,27 @@ function applyUserRolePermissions(user) {
     }
   }
 
-  // 2. Khung dự án trên Header
+  // 2. Khung dự án trên Header (Nằm trên dòng riêng biệt, rộng rãi)
   const scopeBox = document.getElementById('projectHeaderScopeBox');
   if (scopeBox) {
     if (isAdmin || isMod) {
       // Admin và Điều hành có thể xem và lọc qua lại giữa mọi dự án
       scopeBox.innerHTML = `
-        <span class="text-slate-400 text-xs font-medium">Dự án:</span>
+        <span class="text-slate-300 text-xs font-bold flex items-center gap-1 flex-shrink-0">
+          <span>🏗️</span> <span class="hidden xs:inline">Dự Án:</span>
+        </span>
         <select id="headerProjectSelect" onchange="handleHeaderProjectChange()"
-          class="bg-slate-900 text-white text-xs font-semibold rounded px-2 py-1 border border-slate-700 focus:outline-none focus:border-blue-500">
+          class="flex-1 w-full bg-slate-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-blue-500 shadow-inner">
         </select>
       `;
+      populateHeaderProjectDropdown();
     } else {
       // Công trường bị khóa cố định vào đúng dự án của mình
       AppState.selectedProjectId = user.project_id || '';
       scopeBox.innerHTML = `
-        <span class="text-slate-400 text-xs font-medium">Dự án trực thuộc:</span>
-        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-          🏗️ ${escapeHtml(user.project_name || 'Công trường phụ trách')}
+        <span class="text-slate-400 text-xs font-medium flex-shrink-0">🏗️ Dự án:</span>
+        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/70 px-2 py-0.5 rounded-lg border border-emerald-800 truncate flex-1">
+          ${escapeHtml(user.project_name || 'Công trường phụ trách')}
         </span>
       `;
     }
@@ -518,9 +521,9 @@ function switchTab(tabId) {
 
   document.querySelectorAll('.nav-tab').forEach((btn) => {
     if (btn.dataset.tab === tabId) {
-      btn.className = 'nav-tab active-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-white bg-blue-600 font-semibold';
+      btn.className = 'nav-tab active-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-white bg-blue-600 font-semibold shadow-sm text-xs sm:text-sm';
     } else {
-      btn.className = 'nav-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800 font-medium';
+      btn.className = 'nav-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-slate-400 hover:text-white hover:bg-slate-800/80 font-medium text-xs sm:text-sm';
     }
   });
 
