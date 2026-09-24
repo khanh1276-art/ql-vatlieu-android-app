@@ -39,11 +39,10 @@ async function apiFetch(endpoint, options = {}) {
   try {
     const res = await fetch(fullUrl, { ...options, headers });
     if (!res.ok) {
-      if (res.status === 401) {
-        handleUnauthorized();
-        throw new Error('Chưa đăng nhập hoặc phiên làm việc đã hết hạn');
-      }
       const errData = await res.json().catch(() => ({}));
+      if (res.status === 401 && !endpoint.includes('/api/auth/login')) {
+        handleUnauthorized();
+      }
       throw new Error(errData.error || `Yêu cầu thất bại (Mã lỗi: ${res.status})`);
     }
     return res;
@@ -137,16 +136,8 @@ async function checkAuth() {
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res = await fetch('/api/auth/me', {
-      headers: { 'Authorization': `Bearer ${AppState.token}` },
-      signal: controller.signal
-    });
+    const res = await apiFetch('/api/auth/me', { signal: controller.signal });
     clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      handleUnauthorized();
-      return;
-    }
 
     const user = await res.json();
     onLoginSuccess(user, AppState.token, false);
@@ -177,7 +168,7 @@ async function handleLogin(e) {
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const res = await fetch('/api/auth/login', {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -186,16 +177,12 @@ async function handleLogin(e) {
     clearTimeout(timeoutId);
 
     const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Đăng nhập không thành công');
-    }
-
     onLoginSuccess(data.user, data.token, true);
   } catch (err) {
     clearTimeout(timeoutId);
     if (errorDiv) {
       if (err.name === 'AbortError') {
-        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc đang triển khai phiên bản mới. Vui lòng bấm Đăng nhập lại sau 15-30 giây!';
+        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc mạng chậm. Vui lòng bấm Đăng nhập lại sau vài giây!';
       } else {
         errorDiv.textContent = err.message || 'Lỗi kết nối máy chủ';
       }
@@ -241,10 +228,7 @@ function onLoginSuccess(user, token, showGreeting = false) {
 async function handleLogout() {
   if (!confirm('Bạn có chắc chắn muốn đăng xuất khỏi hệ thống?')) return;
   try {
-    await fetch('/api/auth/logout', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${AppState.token}` }
-    });
+    await apiFetch('/api/auth/logout', { method: 'POST' });
   } catch (e) {
     // Bỏ qua lỗi mạng khi logout
   }
@@ -1580,7 +1564,8 @@ function exportDailyExcel() {
   let url = `/api/reports/export-excel?type=daily&date=${date}`;
   if (projectId) url += `&projectId=${projectId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  window.location.href = url;
+  const base = (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) ? NativeApp.getServerUrl() : '';
+  window.open(`${base}${url}`, '_blank');
 }
 
 // ============================================================================
@@ -1699,7 +1684,8 @@ function exportCumulativeExcel() {
   let url = `/api/reports/export-excel?type=cumulative&startDate=${startDate}&endDate=${endDate}`;
   if (projectId) url += `&projectId=${projectId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  window.location.href = url;
+  const base = (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) ? NativeApp.getServerUrl() : '';
+  window.open(`${base}${url}`, '_blank');
 }
 
 // ============================================================================
@@ -2872,15 +2858,7 @@ async function loadBackupInfo() {
 async function downloadJsonBackup() {
   try {
     showToast('Đang chuẩn bị bản sao lưu JSON...', 'info');
-    const token = AppState.token || localStorage.getItem('auth_token');
-    const res = await fetch('/api/backup/export', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Lỗi xuất dữ liệu');
-    }
-
+    const res = await apiFetch('/api/backup/export');
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2902,15 +2880,7 @@ async function downloadJsonBackup() {
 async function downloadDbFile() {
   try {
     showToast('Đang chuẩn bị file database SQLite...', 'info');
-    const token = AppState.token || localStorage.getItem('auth_token');
-    const res = await fetch('/api/backup/download-db', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Lỗi tải database');
-    }
-
+    const res = await apiFetch('/api/backup/download-db');
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
