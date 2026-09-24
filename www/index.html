@@ -82,6 +82,14 @@
           class="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm">
           <span>ĐĂNG NHẬP HỆ THỐNG</span>
         </button>
+
+        <!-- Cấu hình máy chủ kết nối (Render / LAN) -->
+        <div class="pt-3 border-t border-slate-100 text-center">
+          <button type="button" onclick="NativeApp.openServerModal()"
+            class="text-xs text-blue-600 hover:text-blue-800 font-semibold underline flex items-center justify-center gap-1 mx-auto">
+            <span>🌐</span> <span id="loginServerLabel">Máy chủ: ql-vatlieu-congtruong.onrender.com</span>
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -115,6 +123,14 @@
               <span>Cấp Tài Khoản</span>
             </button>
           </div>
+
+          <!-- Nút cấu hình máy chủ kết nối -->
+          <button type="button" onclick="NativeApp.openServerModal()" title="Cấu hình máy chủ kết nối"
+            class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 rounded-lg flex items-center gap-1.5 transition">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="serverStatusText" class="text-[11px] font-mono font-medium text-slate-300 hidden sm:inline">ql-vatlieu-congtruong.onrender.com</span>
+            <span class="text-xs">⚙️</span>
+          </button>
 
           <!-- THÔNG TIN NGƯỜI DÙNG & ĐĂNG XUẤT -->
           <div class="flex items-center space-x-2 bg-slate-800 pl-3 pr-2 py-1.5 rounded-lg border border-slate-700">
@@ -323,6 +339,28 @@
               <label class="block text-xs font-semibold text-slate-600 mb-1">Vị trí dỡ hàng / Ghi chú</label>
               <input type="text" id="checkin_notes" placeholder="VD: Bãi số 1, hố móng trụ cầu P12..."
                 class="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-blue-500 focus:outline-none">
+            </div>
+
+            <!-- Tích hợp Camera điện thoại chụp ảnh phiếu cân / xe -->
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-bold text-slate-700 uppercase">
+                  📷 Chụp Ảnh Phiếu Cân / Xe (Tùy Chọn)
+                </label>
+                <span class="text-[11px] text-slate-500">Camera điện thoại</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <input type="file" id="ticketPhotoInput" accept="image/*" capture="environment" class="hidden" onchange="NativeApp.handlePhotoSelect(event)">
+                <button type="button" onclick="document.getElementById('ticketPhotoInput').click()"
+                  class="px-3.5 py-2 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-sm transition">
+                  <span>📸</span> Bật Camera Chụp
+                </button>
+                <div id="ticketPhotoPreview" class="hidden flex items-center gap-2 text-xs text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                  <img id="ticketPhotoImg" class="w-8 h-8 object-cover rounded border border-slate-300">
+                  <span class="font-medium text-emerald-700">Đã chụp ảnh</span>
+                  <button type="button" onclick="NativeApp.removePhoto()" class="text-red-500 hover:text-red-700 font-bold ml-1">✕</button>
+                </div>
+              </div>
             </div>
 
             <!-- Nút bấm Xác nhận vào -->
@@ -1688,6 +1726,7 @@
   <!-- TOAST NOTIFICATION CONTAINER -->
   <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
 
+  <script src="native.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
