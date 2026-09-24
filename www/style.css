@@ -20,10 +20,12 @@ html, body {
   height: 100%;
 }
 
-/* Cho phép chọn văn bản trong ô nhập liệu */
+/* Cho phép chọn văn bản trong ô nhập liệu và tăng tốc GPU khi gõ */
 input, textarea, select {
   -webkit-user-select: text !important;
   user-select: text !important;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 /* Chuẩn hóa toàn bộ hình ảnh cố định, không méo tỉ lệ */
