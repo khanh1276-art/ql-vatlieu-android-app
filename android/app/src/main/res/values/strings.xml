@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Kho Vật Liệu</string>
-    <string name="title_activity_main">Kho Vật Liệu</string>
+    <string name="app_name">FECON QLVT</string>
+    <string name="title_activity_main">FECON QLVT</string>
     <string name="package_name">com.khovattu.congtruong</string>
     <string name="custom_url_scheme">com.khovattu.congtruong</string>
 </resources>

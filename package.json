@@ -1,7 +1,7 @@
 {
-  "name": "ql-vatlieu-android-app",
-  "version": "1.0.0",
-  "description": "Ứng dụng Android Native Quản Lý Kho Vật Liệu & Xe Vào Ra Công Trường (Hybrid Native Capacitor)",
+  "name": "fecon-qlvt-app",
+  "version": "1.2.7",
+  "description": "Ứng dụng Android FECON QLVT - Quản Lý Vật Tư Công Trường (Hybrid Native Capacitor)",
   "main": "www/index.html",
   "scripts": {
     "build": "node build.js",
