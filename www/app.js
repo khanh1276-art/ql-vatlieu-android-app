@@ -22,47 +22,21 @@ const AppState = {
 // ============================================================================
 // 1. API FETCH WRAPPER (TỰ ĐỘNG GẮN TOKEN & BẢO MẬT)
 // ============================================================================
-const API_DEFAULT_BASE = 'https://ql-vatlieu-congtruong.onrender.com';
-
-function getApiBaseUrl() {
-  if (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) {
-    return NativeApp.getServerUrl();
-  }
-  return localStorage.getItem('native_server_url') || API_DEFAULT_BASE;
-}
-
-async function apiFetch(endpoint, options = {}) {
-  let fullUrl = endpoint;
-  if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
-    const base = getApiBaseUrl();
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    fullUrl = `${base}${cleanEndpoint}`;
-  }
-
+async function apiFetch(url, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   if (AppState.token) {
     headers['Authorization'] = `Bearer ${AppState.token}`;
   }
-
-  try {
-    const res = await fetch(fullUrl, { ...options, headers });
-    if (!res.ok) {
-      let errData = {};
-      try {
-        errData = await res.json();
-      } catch (_) {}
-      if (res.status === 401 && !endpoint.includes('/api/auth/login')) {
-        handleUnauthorized();
-      }
-      throw new Error(errData.error || `Yêu cầu thất bại (Mã lỗi: ${res.status})`);
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error('Chưa đăng nhập hoặc phiên làm việc đã hết hạn');
     }
-    return res;
-  } catch (err) {
-    if (typeof NativeApp !== 'undefined' && NativeApp.vibrateError) {
-      NativeApp.vibrateError();
-    }
-    throw err;
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Yêu cầu thất bại (Mã lỗi: ${res.status})`);
   }
+  return res;
 }
 
 // ============================================================================
@@ -79,12 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (remembered && uInput && !uInput.value) {
     uInput.value = remembered;
   }
-
-  // Tự động tải trước danh mục công khai (Dự án, Nhà cung cấp, Vật liệu, Xe)
-  loadProjects().catch(() => {});
-  loadSuppliers().catch(() => {});
-  loadMaterials().catch(() => {});
-  loadVehicles().catch(() => {});
 
   // Tự động làm mới xe trong bãi mỗi 20 giây nếu đang ở tab vào/ra hoặc dashboard
   setInterval(() => {
@@ -157,13 +125,19 @@ async function checkAuth() {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res = await apiFetch('/api/auth/me', {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${AppState.token}` },
       signal: controller.signal
     });
     clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      handleUnauthorized();
+      return;
+    }
 
     const user = await res.json();
     onLoginSuccess(user, AppState.token, false);
@@ -191,10 +165,10 @@ async function handleLogin(e) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const res = await apiFetch('/api/auth/login', {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -203,6 +177,10 @@ async function handleLogin(e) {
     clearTimeout(timeoutId);
 
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Đăng nhập không thành công');
+    }
+
     // Ghi nhớ tên đăng nhập nếu chọn Remember Me
     const rememberCheckbox = document.getElementById('rememberMe');
     if (rememberCheckbox && rememberCheckbox.checked) {
@@ -216,9 +194,9 @@ async function handleLogin(e) {
     clearTimeout(timeoutId);
     if (errorDiv) {
       if (err.name === 'AbortError') {
-        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc mạng chậm. Vui lòng bấm Đăng nhập lại sau vài giây!';
+        errorDiv.textContent = 'Máy chủ Render đang thức dậy hoặc đang triển khai phiên bản mới. Vui lòng bấm Đăng nhập lại sau 15-30 giây!';
       } else {
-        errorDiv.textContent = err.message || 'Tên đăng nhập hoặc mật khẩu không đúng';
+        errorDiv.textContent = err.message || 'Lỗi kết nối máy chủ';
       }
       errorDiv.classList.remove('hidden');
     }
@@ -283,8 +261,9 @@ function onLoginSuccess(user, token, showGreeting = false) {
 async function handleLogout() {
   if (!confirm('Bạn có chắc chắn muốn đăng xuất khỏi hệ thống?')) return;
   try {
-    await apiFetch('/api/auth/logout', {
-      method: 'POST'
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
   } catch (e) {
     // Bỏ qua lỗi mạng khi logout
@@ -339,27 +318,24 @@ function applyUserRolePermissions(user) {
     }
   }
 
-  // 2. Khung dự án trên Header (Nằm trên dòng riêng biệt, rộng rãi)
+  // 2. Khung dự án trên Header
   const scopeBox = document.getElementById('projectHeaderScopeBox');
   if (scopeBox) {
     if (isAdmin || isMod) {
       // Admin và Điều hành có thể xem và lọc qua lại giữa mọi dự án
       scopeBox.innerHTML = `
-        <span class="text-slate-300 text-xs font-bold flex items-center gap-1 flex-shrink-0">
-          <span>🏗️</span> <span class="hidden xs:inline">Dự Án:</span>
-        </span>
+        <span class="text-slate-400 text-xs font-medium">Dự án:</span>
         <select id="headerProjectSelect" onchange="handleHeaderProjectChange()"
-          class="flex-1 w-full bg-slate-900 text-white text-xs font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-blue-500 shadow-inner">
+          class="bg-slate-900 text-white text-xs font-semibold rounded px-2 py-1 border border-slate-700 focus:outline-none focus:border-blue-500">
         </select>
       `;
-      populateProjectDropdowns();
     } else {
       // Công trường bị khóa cố định vào đúng dự án của mình
       AppState.selectedProjectId = user.project_id || '';
       scopeBox.innerHTML = `
-        <span class="text-slate-400 text-xs font-medium flex-shrink-0">🏗️ Dự án:</span>
-        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/70 px-2 py-0.5 rounded-lg border border-emerald-800 truncate flex-1">
-          ${escapeHtml(user.project_name || 'Công trường phụ trách')}
+        <span class="text-slate-400 text-xs font-medium">Dự án trực thuộc:</span>
+        <span class="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+          🏗️ ${escapeHtml(user.project_name || 'Công trường phụ trách')}
         </span>
       `;
     }
@@ -421,20 +397,9 @@ async function loadInitialData() {
 // 5. QUẢN LÝ DỰ ÁN & BỘ CHỌN DỰ ÁN (PROJECT SWITCHER)
 // ============================================================================
 async function loadProjects() {
-  if (!AppState.projects || AppState.projects.length === 0) {
-    try {
-      const cached = localStorage.getItem('cached_projects');
-      if (cached) {
-        AppState.projects = JSON.parse(cached);
-        populateProjectDropdowns();
-      }
-    } catch (_) {}
-  }
-
   try {
     const res = await apiFetch('/api/projects');
     AppState.projects = await res.json();
-    try { localStorage.setItem('cached_projects', JSON.stringify(AppState.projects)); } catch (_) {}
     populateProjectDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục dự án:', err);
@@ -575,9 +540,9 @@ function switchTab(tabId) {
 
   document.querySelectorAll('.nav-tab').forEach((btn) => {
     if (btn.dataset.tab === tabId) {
-      btn.className = 'nav-tab active-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-white bg-blue-600 font-semibold shadow-sm text-xs sm:text-sm';
+      btn.className = 'nav-tab active-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-white bg-blue-600 font-semibold';
     } else {
-      btn.className = 'nav-tab flex-1 sm:flex-initial flex items-center justify-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition text-slate-400 hover:text-white hover:bg-slate-800/80 font-medium text-xs sm:text-sm';
+      btn.className = 'nav-tab flex items-center space-x-2 px-3 py-2 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800 font-medium';
     }
   });
 
@@ -608,20 +573,9 @@ function switchTab(tabId) {
 // 7. NẠP DANH MỤC CƠ BẢN (SUPPLIERS, MATERIALS, VEHICLES)
 // ============================================================================
 async function loadSuppliers() {
-  if (!AppState.suppliers || AppState.suppliers.length === 0) {
-    try {
-      const cached = localStorage.getItem('cached_suppliers');
-      if (cached) {
-        AppState.suppliers = JSON.parse(cached);
-        populateSupplierDropdowns();
-      }
-    } catch (_) {}
-  }
-
   try {
     const res = await apiFetch('/api/suppliers');
     AppState.suppliers = await res.json();
-    try { localStorage.setItem('cached_suppliers', JSON.stringify(AppState.suppliers)); } catch (_) {}
     populateSupplierDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục nhà cung cấp:', err);
@@ -654,20 +608,9 @@ function populateSupplierDropdowns() {
 }
 
 async function loadMaterials() {
-  if (!AppState.materials || AppState.materials.length === 0) {
-    try {
-      const cached = localStorage.getItem('cached_materials');
-      if (cached) {
-        AppState.materials = JSON.parse(cached);
-        populateMaterialDropdowns();
-      }
-    } catch (_) {}
-  }
-
   try {
     const res = await apiFetch('/api/materials');
     AppState.materials = await res.json();
-    try { localStorage.setItem('cached_materials', JSON.stringify(AppState.materials)); } catch (_) {}
     populateMaterialDropdowns();
   } catch (err) {
     console.error('Lỗi tải danh mục vật liệu:', err);
@@ -691,19 +634,9 @@ function populateMaterialDropdowns() {
 }
 
 async function loadVehicles() {
-  if (!AppState.vehicles || AppState.vehicles.length === 0) {
-    try {
-      const cached = localStorage.getItem('cached_vehicles');
-      if (cached) {
-        AppState.vehicles = JSON.parse(cached);
-      }
-    } catch (_) {}
-  }
-
   try {
     const res = await apiFetch('/api/vehicles');
     AppState.vehicles = await res.json();
-    try { localStorage.setItem('cached_vehicles', JSON.stringify(AppState.vehicles)); } catch (_) {}
   } catch (err) {
     console.error('Lỗi tải danh mục xe:', err);
   }
@@ -974,43 +907,21 @@ async function handleCheckIn(event) {
     btn.innerHTML = '<span>⏳ Đang ghi nhận...</span>';
   }
 
-  if (typeof NativeApp !== 'undefined' && NativeApp.capturedPhotoBase64) {
-    payload.photo_base64 = NativeApp.capturedPhotoBase64;
-    payload.notes = (payload.notes ? (payload.notes + ' ') : '') + '[Có kèm ảnh chụp]';
-  }
-
-  let isOffline = !navigator.onLine;
-  let data = null;
-
   try {
-    if (!isOffline) {
-      try {
-        const res = await apiFetch('/api/tickets/checkin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        data = await res.json();
-      } catch (netErr) {
-        console.warn('Không có kết nối máy chủ, chuyển sang hàng đợi offline:', netErr);
-        isOffline = true;
-      }
+    const res = await apiFetch('/api/tickets/checkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Lỗi khi ghi nhận xe vào');
     }
 
-    if (isOffline) {
-      if (typeof NativeApp !== 'undefined' && NativeApp.saveTicketToQueue) {
-        NativeApp.saveTicketToQueue(payload);
-        if (NativeApp.removePhoto) NativeApp.removePhoto();
-      }
-      showToast(`💾 ĐÃ LƯU NGOẠI TUYẾN: Xe ${payload.plate_number}. Sẽ tự đồng bộ khi có sóng 4G/Wifi!`, 'warning');
-    } else {
-      if (typeof NativeApp !== 'undefined') {
-        if (NativeApp.vibrateSuccess) NativeApp.vibrateSuccess();
-        if (NativeApp.removePhoto) NativeApp.removePhoto();
-      }
-      showToast(`✓ Đã ghi nhận xe ${data.plate_number} vào ${data.project_name || 'công trường'}! (${data.actual_volume} ${data.unit})`, 'success');
-      loadVehicles();
-    }
+    showToast(`✓ Đã ghi nhận xe ${data.plate_number} vào ${data.project_name || 'công trường'}! (${data.actual_volume} ${data.unit})`, 'success');
+
+    loadVehicles();
 
     // Reset form
     const form = document.getElementById('checkInForm');
@@ -1685,8 +1596,7 @@ function exportDailyExcel() {
   if (projectId) url += `&projectId=${projectId}`;
   if (supplierId) url += `&supplierId=${supplierId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  const base = getApiBaseUrl();
-  window.open(`${base}${url}`, '_blank');
+  window.location.href = url;
 }
 
 // ============================================================================
@@ -1805,8 +1715,7 @@ function exportCumulativeExcel() {
   let url = `/api/reports/export-excel?type=cumulative&startDate=${startDate}&endDate=${endDate}`;
   if (projectId) url += `&projectId=${projectId}`;
   if (AppState.token) url += `&token=${encodeURIComponent(AppState.token)}`;
-  const base = getApiBaseUrl();
-  window.open(`${base}${url}`, '_blank');
+  window.location.href = url;
 }
 
 // ============================================================================
@@ -2980,7 +2889,15 @@ async function loadBackupInfo() {
 async function downloadJsonBackup() {
   try {
     showToast('Đang chuẩn bị bản sao lưu JSON...', 'info');
-    const res = await apiFetch('/api/backup/export');
+    const token = AppState.token || localStorage.getItem('auth_token');
+    const res = await fetch('/api/backup/export', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Lỗi xuất dữ liệu');
+    }
+
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3002,7 +2919,15 @@ async function downloadJsonBackup() {
 async function downloadDbFile() {
   try {
     showToast('Đang chuẩn bị file database SQLite...', 'info');
-    const res = await apiFetch('/api/backup/download-db');
+    const token = AppState.token || localStorage.getItem('auth_token');
+    const res = await fetch('/api/backup/download-db', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Lỗi tải database');
+    }
+
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3212,7 +3137,7 @@ window.downloadDbFile = downloadDbFile;
 window.restoreBackupFromFile = restoreBackupFromFile;
 
 // ============================================================================
-// 17. NHẬP LIỆU BỔ SUNG TỪ FILE EXCEL (BATCH IMPORT)
+// 12. NHẬP LIỆU BỔ SUNG THEO FILE EXCEL BÁO CÁO NGÀY (IMPORT EXCEL BATCH)
 // ============================================================================
 const ImportState = {
   workbook: null,
@@ -3281,8 +3206,7 @@ function closeImportExcelModal() {
 }
 
 function downloadImportTemplate() {
-  const base = getApiBaseUrl();
-  window.open(`${base}/api/reports/download-import-template`, '_blank');
+  window.location.href = '/api/reports/download-import-template';
 }
 
 function handleImportDragOver(e) {
@@ -3315,7 +3239,7 @@ function handleImportFileChange(e) {
 function processImportFile(file) {
   if (!file) return;
   if (!window.XLSX) {
-    showToast('Thư viện đọc Excel chưa sẵn sàng. Vui lòng thử lại.', 'error');
+    showToast('Thư viện đọc Excel chưa sẵn sàng. Vui lòng tải lại trang.', 'error');
     return;
   }
 
@@ -3344,6 +3268,7 @@ function processImportFile(file) {
       const sheetSelect = document.getElementById('importSheetSelect');
       if (sheetSelect) {
         sheetSelect.innerHTML = workbook.SheetNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+        // Prefer sheet named 'Nhat_Trinh_Ngay' or containing 'Bao_Cao' or 'BC'
         let preferredSheet = workbook.SheetNames[0];
         for (const sName of workbook.SheetNames) {
           const l = sName.toLowerCase();
@@ -3660,7 +3585,7 @@ async function executeImportBatch() {
   }
 }
 
-// Gán các hàm import ra global window
+// Gắn các hàm import ra global window
 window.openImportExcelModal = openImportExcelModal;
 window.closeImportExcelModal = closeImportExcelModal;
 window.downloadImportTemplate = downloadImportTemplate;
@@ -3681,63 +3606,98 @@ const ScannerState = {
   recognizedPlate: null,
   recognitionMethod: null, // 'gemini' hoặc 'tesseract'
   confidence: 0,
-  isScanning: false
+  isScanning: false,
+  isAiConfigured: false
 };
 
-// Chuẩn hóa và làm sạch biển số xe Việt Nam theo quy chuẩn Cục Đăng Kiểm
+// Chuẩn hóa và làm sạch biển số xe Việt Nam theo quy chuẩn Cục Đăng Kiểm (Thông tư 24/2023/TT-BCA)
 function cleanAndNormalizePlateText(text) {
   if (!text) return null;
-  let clean = text.replace(/[^a-zA-Z0-9.\-\s]/g, ' ').toUpperCase();
-  const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
-  let flat = lines.join(' ');
+  // Bỏ ký tự lạ, giữ lại chữ cái, chữ số, dấu chấm, gạch ngang, khoảng trắng và xuống dòng
+  const clean = text.replace(/[^a-zA-Z0-9.\-\n\s]/g, ' ').toUpperCase();
+  const rawLines = clean.split('\n').map(l => l.trim().replace(/\s+/g, '')).filter(Boolean);
 
-  // Pass 1: Định dạng chuẩn 2 chữ số tỉnh + 1-2 chữ cái sê-ri + 3-5 chữ số
-  const strictRegex = /\b([0-9]{2})\s*[-.]?\s*([A-Z]{1,2})\s*[-.]?\s*([0-9]{3,5})(?:[-.\s]*([0-9]{2}))?\b/;
-  let m = flat.match(strictRegex);
+  const fixDigits = (s) => (s || '')
+    .replace(/[ODQ]/g, '0')
+    .replace(/[IL|]/g, '1')
+    .replace(/[Z]/g, '2')
+    .replace(/[E]/g, '3')
+    .replace(/[A]/g, '4')
+    .replace(/[S]/g, '5')
+    .replace(/[Gb]/g, '6')
+    .replace(/[T]/g, '7')
+    .replace(/[B]/g, '8');
+
+  // PASS 1: Khớp biển vuông 2 dòng nguyên bản (dòng 1: "51H", dòng 2: "919.91" hoặc "91991")
+  if (rawLines.length >= 2) {
+    for (let i = 0; i < rawLines.length - 1; i++) {
+      const line1 = rawLines[i];
+      const line2 = rawLines[i + 1];
+      const m1 = line1.match(/^([1-9][0-9])([A-Z]{1,2}|[A-Z][0-9])[-.]?$/);
+      const m2 = line2.match(/^([0-9]{3})[-.]?([0-9]{2})$|^([0-9]{4})$/);
+      if (m1 && m2) {
+        const prov = m1[1];
+        const ser = m1[2];
+        const num = m2[1] ? (m2[1] + '.' + m2[2]) : m2[3];
+        return `${prov}${ser}-${num}`;
+      }
+    }
+  }
+
+  // PASS 2: Khớp biển 1 dòng nguyên bản
+  const flat = clean.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // 2.1: Biển 5 số có chấm: 51H-919.91, 29C-881.23, 15LD-123.45
+  const r5Dot = /\b([1-9][0-9])\s*([A-Z]{1,2}|[A-Z][0-9])\s*[-.]?\s*([0-9]{3})\s*[-.]\s*([0-9]{2})\b/;
+  let m = flat.match(r5Dot);
+  if (m) return `${m[1]}${m[2]}-${m[3]}.${m[4]}`;
+
+  // 2.2: Biển 5 số liền không chấm: 51H91991, 29C 88123
+  const r5Plain = /\b([1-9][0-9])\s*([A-Z]{1,2}|[A-Z][0-9])\s*[-.]?\s*([0-9]{3})([0-9]{2})\b/;
+  m = flat.match(r5Plain);
+  if (m) return `${m[1]}${m[2]}-${m[3]}.${m[4]}`;
+
+  // 2.3: Biển 4 số: 30H-9999, 29C 8888
+  const r4 = /\b([1-9][0-9])\s*([A-Z]{1,2}|[A-Z][0-9])\s*[-.]?\s*([0-9]{4})\b/;
+  m = flat.match(r4);
+  if (m) return `${m[1]}${m[2]}-${m[3]}`;
+
+  // PASS 3: Fallback sửa lỗi OCR nhầm ký tự tương đồng (chỉ sửa khi sê-ri hợp lệ có chữ cái)
+  // Biển 2 dòng có sai lệch ký tự
+  if (rawLines.length >= 2) {
+    for (let i = 0; i < rawLines.length - 1; i++) {
+      let l1 = rawLines[i];
+      let l2 = rawLines[i + 1];
+      let m1 = l1.match(/^([0-9A-Z]{2})([A-Z0-9]{1,2})[-.]?$/);
+      let m2 = l2.match(/^([0-9A-Z]{3})[-.]?([0-9A-Z]{2})$|^([0-9A-Z]{4})$/);
+      if (m1 && m2) {
+        const prov = fixDigits(m1[1]);
+        let ser = m1[2];
+        if (/^[0-9]+$/.test(ser)) continue; // Sê-ri không được là số thuần túy (loại bỏ phím bàn phím)
+        const num = m2[1] ? (fixDigits(m2[1]) + '.' + fixDigits(m2[2])) : fixDigits(m2[3]);
+        if (/^[1-9][0-9]$/.test(prov)) {
+          return `${prov}${ser}-${num}`;
+        }
+      }
+    }
+  }
+
+  // 3.2: Biển 1 dòng có sai lệch ký tự
+  const flatPerm = /\b([0-9A-Z]{2})\s*([A-Z]{1,2}|[A-Z][0-9])\s*[-.]?\s*([0-9A-Z]{3})\s*[-.]?\s*([0-9A-Z]{2})\b/;
+  m = flat.match(flatPerm);
   if (m) {
-    const prov = m[1];
+    const prov = fixDigits(m[1]);
     const ser = m[2];
-    let num = m[3] + (m[4] || '');
-    if (num.length === 5) num = num.slice(0, 3) + '.' + num.slice(3);
-    return `${prov}${ser}-${num}`;
-  }
-
-  // Pass 2: Có dấu chấm phân cách số 5 chữ số: ví dụ 29C-881.23 hoặc 29C 881.23
-  const dotRegex = /\b([0-9]{2})\s*[-.]?\s*([A-Z]{1,2})\s*[-.]?\s*([0-9]{3})\s*[-.]\s*([0-9]{2})\b/;
-  m = flat.match(dotRegex);
-  if (m) {
-    return `${m[1]}${m[2]}-${m[3]}.${m[4]}`;
-  }
-
-  // Pass 3: Bộ sửa nhầm lẫn ký tự OCR (0/O, 1/I, 8/B, 5/S...)
-  const numFix = (s) => (s || '')
-    .replace(/O|D/g, '0')
-    .replace(/I|L|\|/g, '1')
-    .replace(/Z/g, '2')
-    .replace(/E/g, '3')
-    .replace(/A/g, '4')
-    .replace(/S/g, '5')
-    .replace(/G|b/g, '6')
-    .replace(/T/g, '7')
-    .replace(/B/g, '8');
-
-  const permRegex = /\b([0-9OIZESGBTD]{2})\s*[-.]?\s*([A-Z0-9]{1,2})\s*[-.]?\s*([0-9OIZESGBTD]{3,5})(?:[-.\s]*([0-9OIZESGBTD]{2}))?\b/;
-  m = flat.match(permRegex);
-  if (m) {
-    const prov = numFix(m[1]);
-    let ser = m[2];
-    if (ser === '0') ser = 'C';
-    if (ser === '8') ser = 'B';
-    if (ser === '1') ser = 'T';
-    let num = numFix(m[3] + (m[4] || ''));
-    if (num.length === 5) num = num.slice(0, 3) + '.' + num.slice(3);
-    return `${prov}${ser}-${num}`;
+    const num = fixDigits(m[3]) + '.' + fixDigits(m[4]);
+    if (/^[1-9][0-9]$/.test(prov)) {
+      return `${prov}${ser}-${num}`;
+    }
   }
 
   return null;
 }
 
-// Tiền xử lý hình ảnh cho OCR cục bộ: Tăng tương phản, khử nhiễu
+// Tiền xử lý hình ảnh cho OCR cục bộ: Tối ưu kích thước & Nhị phân hóa Otsu Binarization
 function preprocessImageForOcr(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -3746,16 +3706,100 @@ function preprocessImageForOcr(dataUrl) {
       const ctx = canvas.getContext('2d');
       let w = img.width;
       let h = img.height;
-      const maxDim = 1200;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) {
-          h = Math.round((h * maxDim) / w);
-          w = maxDim;
-        } else {
-          w = Math.round((w * maxDim) / h);
-          h = maxDim;
-        }
+      const targetW = 850;
+      if (w > targetW || w < 400) {
+        h = Math.round((h * targetW) / w);
+        w = targetW;
       }
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+
+      try {
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+
+        // Tính toán Otsu threshold để tách nền và chữ số
+        const histogram = new Array(256).fill(0);
+        const totalPixels = d.length / 4;
+        for (let i = 0; i < d.length; i += 4) {
+          const lum = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+          histogram[lum]++;
+        }
+
+        let sum = 0;
+        for (let i = 0; i < 256; i++) sum += i * histogram[i];
+
+        let sumB = 0;
+        let wB = 0;
+        let varMax = 0;
+        let threshold = 128;
+
+        for (let t = 0; t < 256; t++) {
+          wB += histogram[t];
+          if (wB === 0) continue;
+          const wF = totalPixels - wB;
+          if (wF === 0) break;
+          sumB += t * histogram[t];
+          const mB = sumB / wB;
+          const mF = (sum - sumB) / wF;
+          const varBetween = wB * wF * (mB - mF) * (mB - mF);
+          if (varBetween > varMax) {
+            varMax = varBetween;
+            threshold = t;
+          }
+        }
+
+        // Đếm số pixel viền để phân biệt nền sáng hay nền tối
+        let borderDarkCount = 0;
+        let borderTotal = 0;
+        const checkBorder = (idx) => {
+          const lum = 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2];
+          if (lum < threshold) borderDarkCount++;
+          borderTotal++;
+        };
+
+        for (let x = 0; x < w; x++) {
+          checkBorder(x * 4);
+          checkBorder(((h - 1) * w + x) * 4);
+        }
+        for (let y = 0; y < h; y++) {
+          checkBorder((y * w) * 4);
+          checkBorder((y * w + (w - 1)) * 4);
+        }
+
+        const invert = (borderDarkCount / borderTotal) > 0.5;
+
+        // Binarization: Biến ảnh thành đen trắng tuyệt đối
+        for (let i = 0; i < d.length; i += 4) {
+          const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          let val = lum < threshold ? 0 : 255;
+          if (invert) val = 255 - val;
+          d[i] = val;
+          d[i + 1] = val;
+          d[i + 2] = val;
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+      } catch (e) {
+        console.warn('Lỗi bộ lọc Otsu:', e);
+      }
+      resolve(canvas);
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Tiền xử lý dạng Grayscale tăng cường tương phản (dùng làm fallback)
+function preprocessGrayscaleOnly(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      let w = img.width;
+      let h = img.height;
       canvas.width = w;
       canvas.height = h;
       ctx.drawImage(img, 0, 0, w, h);
@@ -3765,15 +3809,13 @@ function preprocessImageForOcr(dataUrl) {
         const d = imgData.data;
         let totalLum = 0;
         for (let i = 0; i < d.length; i += 4) {
-          const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          totalLum += lum;
+          totalLum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
         }
         const avgLum = totalLum / (d.length / 4);
 
         for (let i = 0; i < d.length; i += 4) {
           let lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          // Kéo giãn tương phản
-          lum = ((lum - avgLum) * 1.6) + avgLum;
+          lum = ((lum - avgLum) * 1.8) + avgLum;
           lum = Math.max(0, Math.min(255, lum));
           d[i] = lum;
           d[i + 1] = lum;
@@ -3781,7 +3823,7 @@ function preprocessImageForOcr(dataUrl) {
         }
         ctx.putImageData(imgData, 0, 0);
       } catch (e) {
-        console.warn('Lỗi bộ lọc canvas:', e);
+        console.warn('Lỗi grayscale filter:', e);
       }
       resolve(canvas);
     };
@@ -3808,25 +3850,54 @@ async function recognizeWithClientOcr(dataUrl) {
     });
   }
 
-  updateScannerProgress('⚡ Tiền xử lý hình ảnh...', 'Tăng độ tương phản & khử mờ...', 40);
+  updateScannerProgress('⚡ Tiền xử lý hình ảnh...', 'Lọc tương phản Otsu & khử mờ...', 40);
   const preprocessedCanvas = await preprocessImageForOcr(dataUrl);
 
   updateScannerProgress('⚡ Đang quét OCR thiết bị...', 'Đọc các ký tự biển số...', 60);
 
-  const res = await Tesseract.recognize(preprocessedCanvas, 'eng', {
-    logger: m => {
-      if (m.status === 'recognizing text') {
-        const pct = 60 + Math.round((m.progress || 0) * 35);
-        updateScannerProgress('⚡ Đang đọc ký tự OCR...', `${pct}%`, pct);
-      }
-    }
-  });
+  let rawText = '';
+  let conf = 0.75;
 
-  const rawText = res?.data?.text || '';
-  const parsedPlate = cleanAndNormalizePlateText(rawText);
+  try {
+    const res = await Tesseract.recognize(preprocessedCanvas, 'eng', {
+      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.-',
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = 60 + Math.round((m.progress || 0) * 35);
+          updateScannerProgress('⚡ Đang đọc ký tự OCR...', `${pct}%`, pct);
+        }
+      }
+    });
+    rawText = res?.data?.text || '';
+    conf = res?.data?.confidence ? Math.round(res.data.confidence) / 100 : 0.75;
+  } catch (err) {
+    console.warn('Lỗi OCR Otsu:', err);
+  }
+
+  let parsedPlate = cleanAndNormalizePlateText(rawText);
+
+  // Nếu binarize chưa đọc được, quét thử với grayscale contrast
+  if (!parsedPlate) {
+    updateScannerProgress('⚡ Quét bổ sung...', 'Thử nghiệm phương sai tương phản...', 85);
+    try {
+      const fallbackCanvas = await preprocessGrayscaleOnly(dataUrl);
+      const res2 = await Tesseract.recognize(fallbackCanvas, 'eng', {
+        tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
+      });
+      const rawText2 = res2?.data?.text || '';
+      parsedPlate = cleanAndNormalizePlateText(rawText2);
+      if (parsedPlate) {
+        rawText = rawText2;
+        conf = res2?.data?.confidence ? Math.round(res2.data.confidence) / 100 : 0.7;
+      }
+    } catch (e2) {
+      console.warn('Lỗi OCR fallback:', e2);
+    }
+  }
+
   return {
     plate: parsedPlate,
-    confidence: res?.data?.confidence ? Math.round(res.data.confidence) / 100 : 0.75,
+    confidence: conf,
     rawText
   };
 }
@@ -3841,6 +3912,47 @@ function updateScannerProgress(title, sub, pct = null) {
   if (bar && pct !== null) bar.style.width = `${Math.min(100, Math.max(5, pct))}%`;
 }
 
+// Kiểm tra và cập nhật banner trạng thái AI trên modal quét
+async function checkScannerAiStatus() {
+  const banner = document.getElementById('scannerAiBanner');
+  const icon = document.getElementById('scannerAiIcon');
+  const text = document.getElementById('scannerAiText');
+  const btn = document.getElementById('scannerAiKeyBtn');
+  if (!banner) return;
+
+  const localKey = (localStorage.getItem('gemini_api_key') || '').trim();
+  let serverConfigured = false;
+
+  try {
+    const res = await apiFetch('/api/settings');
+    if (res.ok) {
+      const data = await res.json();
+      serverConfigured = !!data.gemini_configured;
+    }
+  } catch (e) {}
+
+  const hasKey = !!localKey || serverConfigured;
+  ScannerState.isAiConfigured = hasKey;
+
+  if (hasKey) {
+    banner.className = 'p-2.5 rounded-xl text-xs flex items-center justify-between transition-all bg-emerald-50 border border-emerald-200 text-emerald-900';
+    if (icon) icon.textContent = '✨';
+    if (text) text.innerHTML = '<b>Google Gemini AI Vision:</b> Đã sẵn sàng (Nhận diện siêu tốc & chuẩn xác 99%).';
+    if (btn) {
+      btn.className = 'ml-2 shrink-0 px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold text-[11px] shadow-sm transition';
+      btn.textContent = '⚙️ Đổi Key';
+    }
+  } else {
+    banner.className = 'p-2.5 rounded-xl text-xs flex items-center justify-between transition-all bg-amber-50 border border-amber-200 text-amber-900';
+    if (icon) icon.textContent = '⚡';
+    if (text) text.innerHTML = 'Đang dùng <b>OCR Thiết Bị</b>. Nhập Gemini Key miễn phí để đọc chuẩn 100%.';
+    if (btn) {
+      btn.className = 'ml-2 shrink-0 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-bold text-[11px] shadow-sm transition';
+      btn.textContent = '🔑 Cài Key AI';
+    }
+  }
+}
+
 // Mở Modal Quét Biển Số
 async function openPlateScannerModal() {
   const modal = document.getElementById('plateScannerModal');
@@ -3848,6 +3960,7 @@ async function openPlateScannerModal() {
   modal.classList.remove('hidden');
 
   resetScannerView();
+  checkScannerAiStatus();
   await startScannerCamera();
 }
 
@@ -3856,6 +3969,51 @@ function closePlateScannerModal() {
   stopScannerCamera();
   const modal = document.getElementById('plateScannerModal');
   if (modal) modal.classList.add('hidden');
+}
+
+// Modal Cấu hình nhanh Gemini API Key
+function openQuickAiKeyModal() {
+  const modal = document.getElementById('quickAiKeyModal');
+  const input = document.getElementById('quick_gemini_key_input');
+  if (input) {
+    input.value = localStorage.getItem('gemini_api_key') || '';
+  }
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeQuickAiKeyModal() {
+  const modal = document.getElementById('quickAiKeyModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function toggleQuickKeyVisibility() {
+  const input = document.getElementById('quick_gemini_key_input');
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+async function saveQuickAiKey() {
+  const input = document.getElementById('quick_gemini_key_input');
+  const keyVal = (input?.value || '').trim();
+
+  if (keyVal) {
+    localStorage.setItem('gemini_api_key', keyVal);
+  } else {
+    localStorage.removeItem('gemini_api_key');
+  }
+
+  // Thử đồng bộ lên máy chủ nếu có quyền
+  try {
+    await apiFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gemini_api_key: keyVal })
+    });
+  } catch (e) {}
+
+  closeQuickAiKeyModal();
+  checkScannerAiStatus();
+  showToast(keyVal ? '✓ Đã kích hoạt Google Gemini AI Vision thành công!' : 'Đã xóa API Key.', 'success');
 }
 
 // Bật Camera WebRTC
@@ -3933,25 +4091,64 @@ function resetScannerView() {
   if (controls) controls.classList.remove('hidden');
 }
 
-// Bấm nút Chụp & Nhận Diện từ video camera
+// Bấm nút Chụp & Nhận Diện từ video camera - Cắt chuẩn xác theo khung viền scannerTargetBox
 async function captureAndRecognize() {
   if (ScannerState.isScanning) return;
 
   const video = document.getElementById('scannerVideo');
-  const canvas = document.getElementById('scannerCanvas') || document.createElement('canvas');
+  const targetBox = document.getElementById('scannerTargetBox');
 
   if (!video || !video.videoWidth) {
     document.getElementById('scannerFileInput')?.click();
     return;
   }
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  // 1. Chụp toàn cảnh video
+  const fullCanvas = document.createElement('canvas');
+  fullCanvas.width = video.videoWidth;
+  fullCanvas.height = video.videoHeight;
+  const fullCtx = fullCanvas.getContext('2d');
+  fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
+  const fullDataUrl = fullCanvas.toDataURL('image/jpeg', 0.88);
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-  await processPlateRecognition(dataUrl);
+  // 2. Cắt chính xác vùng khung ngắm vàng scannerTargetBox trên video thực tế
+  let cropDataUrl = fullDataUrl;
+  if (targetBox) {
+    const videoRect = video.getBoundingClientRect();
+    const boxRect = targetBox.getBoundingClientRect();
+
+    if (videoRect.width > 0 && videoRect.height > 0) {
+      const scale = Math.max(videoRect.width / video.videoWidth, videoRect.height / video.videoHeight);
+      const renderedWidth = video.videoWidth * scale;
+      const renderedHeight = video.videoHeight * scale;
+      const offsetX = (renderedWidth - videoRect.width) / 2;
+      const offsetY = (renderedHeight - videoRect.height) / 2;
+
+      const boxLeft = (boxRect.left - videoRect.left) + offsetX;
+      const boxTop = (boxRect.top - videoRect.top) + offsetY;
+
+      // Thêm lề 8% để không bao giờ bị cắt mất ký tự rìa
+      const padW = boxRect.width * 0.08;
+      const padH = boxRect.height * 0.08;
+
+      const cropX = Math.max(0, Math.round((boxLeft - padW) / scale));
+      const cropY = Math.max(0, Math.round((boxTop - padH) / scale));
+      const cropW = Math.min(video.videoWidth - cropX, Math.round((boxRect.width + 2 * padW) / scale));
+      const cropH = Math.min(video.videoHeight - cropY, Math.round((boxRect.height + 2 * padH) / scale));
+
+      if (cropW > 50 && cropH > 30) {
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = cropW;
+        cropCanvas.height = cropH;
+        const cropCtx = cropCanvas.getContext('2d');
+        cropCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+        cropDataUrl = cropCanvas.toDataURL('image/jpeg', 0.92);
+      }
+    }
+  }
+
+  // Nhận diện trên ảnh crop, đồng thời lưu ảnh toàn cảnh làm bằng chứng phiếu
+  await processPlateRecognition(cropDataUrl, fullDataUrl);
 }
 
 // Xử lý khi người dùng chọn ảnh hoặc chụp ảnh từ máy
@@ -3962,23 +4159,23 @@ function handleScannerFileSelect(event) {
   const reader = new FileReader();
   reader.onload = async (e) => {
     const dataUrl = e.target.result;
-    await processPlateRecognition(dataUrl);
+    await processPlateRecognition(dataUrl, dataUrl);
   };
   reader.readAsDataURL(file);
 
-  // Đặt lại input để có thể chọn lại cùng 1 file nếu muốn
   event.target.value = '';
 }
 
 // Luồng nhận diện HYBRID cốt lõi (AI Cloud -> Fallback Local OCR)
-async function processPlateRecognition(dataUrl) {
+async function processPlateRecognition(cropDataUrl, fullDataUrl = null) {
   ScannerState.isScanning = true;
-  ScannerState.capturedDataUrl = dataUrl;
+  // Lưu ảnh phiếu: Ưu tiên ảnh chụp toàn cảnh nếu có
+  ScannerState.capturedDataUrl = fullDataUrl || cropDataUrl;
 
-  // Hiển thị ảnh chụp tĩnh lên viewfinder
+  // Hiển thị ảnh chụp lên viewfinder
   const preview = document.getElementById('scannerCapturedPreview');
   if (preview) {
-    preview.src = dataUrl;
+    preview.src = cropDataUrl || fullDataUrl;
     preview.classList.remove('hidden');
   }
 
@@ -3993,14 +4190,19 @@ async function processPlateRecognition(dataUrl) {
   let recognizedPlate = null;
   let method = 'gemini';
   let confidence = 0.95;
-  let vehicleType = '';
 
-  // BƯỚC 1: Thử nhận diện bằng AI Vision (Cloud Gemini 3.8 Flash)
+  const localKey = (localStorage.getItem('gemini_api_key') || '').trim();
+
+  // BƯỚC 1: Thử nhận diện bằng Google Gemini AI Vision
   try {
     const res = await apiFetch('/api/ai/recognize-plate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl })
+      body: JSON.stringify({ 
+        image: cropDataUrl,
+        full_image: fullDataUrl,
+        api_key: localKey
+      })
     });
 
     const aiResult = await res.json();
@@ -4008,19 +4210,22 @@ async function processPlateRecognition(dataUrl) {
       recognizedPlate = aiResult.plate;
       confidence = aiResult.confidence || 0.98;
       method = 'gemini';
-      vehicleType = aiResult.vehicle_type || '';
+      ScannerState.isAiConfigured = true;
     } else {
-      console.log('AI Vision phản hồi cần fallback:', aiResult.message);
+      console.log('AI Vision chuyển hướng fallback:', aiResult.message);
+      if (aiResult.error === 'NO_API_KEY') {
+        ScannerState.isAiConfigured = false;
+      }
     }
   } catch (aiErr) {
     console.warn('Lỗi gọi AI Cloud (chuyển sang OCR thiết bị):', aiErr.message);
   }
 
-  // BƯỚC 2: Nếu AI Cloud không đọc được hoặc không có API Key, chạy OCR Thiết Bị Cục Bộ
+  // BƯỚC 2: Nếu AI Cloud chưa đọc được hoặc chưa cài API Key, chạy OCR Thiết Bị Cục Bộ trên ảnh crop
   if (!recognizedPlate) {
-    updateScannerProgress('⚡ Chuyển sang OCR thiết bị...', 'Nhận diện cục bộ trên trình duyệt/Android...', 45);
+    updateScannerProgress('⚡ Chuyển sang OCR thiết bị...', 'Đang quét ký tự biển số trên thiết bị...', 45);
     try {
-      const ocrResult = await recognizeWithClientOcr(dataUrl);
+      const ocrResult = await recognizeWithClientOcr(cropDataUrl);
       if (ocrResult && ocrResult.plate) {
         recognizedPlate = ocrResult.plate;
         confidence = ocrResult.confidence || 0.8;
@@ -4218,6 +4423,7 @@ async function testGeminiConnection() {
 
   showToast('🧪 Đang kiểm tra kết nối tới Google Gemini AI...', 'info');
 
+  // Tạo một ảnh mẫu 1x1 pixel base64 để test endpoint
   const testCanvas = document.createElement('canvas');
   testCanvas.width = 100;
   testCanvas.height = 40;
@@ -4230,6 +4436,7 @@ async function testGeminiConnection() {
   const sampleDataUrl = testCanvas.toDataURL('image/jpeg');
 
   try {
+    // Nếu người dùng nhập key mới trên form thì tạm lưu trước
     if (tempKey) {
       await apiFetch('/api/settings', {
         method: 'POST',
@@ -4273,5 +4480,9 @@ window.loadAiSettings = loadAiSettings;
 window.saveAiSettings = saveAiSettings;
 window.toggleApiKeyVisibility = toggleApiKeyVisibility;
 window.testGeminiConnection = testGeminiConnection;
-
+window.openQuickAiKeyModal = openQuickAiKeyModal;
+window.closeQuickAiKeyModal = closeQuickAiKeyModal;
+window.toggleQuickKeyVisibility = toggleQuickKeyVisibility;
+window.saveQuickAiKey = saveQuickAiKey;
+window.checkScannerAiStatus = checkScannerAiStatus;
 
