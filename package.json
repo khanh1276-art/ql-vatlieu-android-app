@@ -1,6 +1,6 @@
 {
   "name": "fecon-qlvt-app",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "Ứng dụng Android FECON QLVT - Quản Lý Vật Tư Công Trường (Hybrid Native Capacitor)",
   "main": "www/index.html",
   "scripts": {
