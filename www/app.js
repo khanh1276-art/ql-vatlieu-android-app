@@ -28,20 +28,7 @@ function getApiBaseUrl() {
   if (typeof NativeApp !== 'undefined' && NativeApp.getServerUrl) {
     return NativeApp.getServerUrl();
   }
-  const saved = localStorage.getItem('native_server_url');
-  if (saved) return saved;
-
-  // Phát hiện môi trường chạy Android App (Capacitor Webview / file:// / capacitor://)
-  const isMobileApp = typeof window.Capacitor !== 'undefined' ||
-                      window.location.protocol === 'capacitor:' ||
-                      window.location.protocol === 'file:' ||
-                      (window.location.hostname === 'localhost' && !window.location.port);
-  if (isMobileApp) {
-    return API_DEFAULT_BASE;
-  }
-
-  // Môi trường Web thông thường (Render hoặc localhost web server port 3000)
-  return '';
+  return localStorage.getItem('native_server_url') || API_DEFAULT_BASE;
 }
 
 async function apiFetch(endpoint, options = {}) {
