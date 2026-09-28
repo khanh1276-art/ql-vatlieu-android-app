@@ -934,7 +934,7 @@ async function handleCheckIn(event) {
     is_manual_adjusted: isManual ? 1 : 0,
     adjustment_reason: adjustReason,
     notes,
-    plate_image: AppState.currentScannedPlateImage || null
+    plate_image: AppState.currentScannedPlateImage || (typeof NativeApp !== 'undefined' && NativeApp.capturedPhotoBase64 ? NativeApp.capturedPhotoBase64 : null)
   };
 
   const btn = document.getElementById('btnSubmitCheckIn');
@@ -964,6 +964,9 @@ async function handleCheckIn(event) {
     if (form) form.reset();
 
     removeScannedPlateImage();
+    if (typeof NativeApp !== 'undefined' && NativeApp.removePhoto) {
+      NativeApp.removePhoto();
+    }
 
     if (AppState.currentUser?.role === 'SITE_USER') {
       const projSel = document.getElementById('checkin_project');
@@ -992,6 +995,13 @@ async function handleCheckIn(event) {
     showTicketModal(data);
 
   } catch (err) {
+    if (typeof NativeApp !== 'undefined' && NativeApp.saveTicketToQueue && (!navigator.onLine || (err.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))))) {
+      NativeApp.saveTicketToQueue(payload);
+      if (typeof NativeApp.removePhoto === 'function') NativeApp.removePhoto();
+      const form = document.getElementById('checkInForm');
+      if (form) form.reset();
+      return;
+    }
     showToast(err.message, 'error');
   } finally {
     if (btn) {
